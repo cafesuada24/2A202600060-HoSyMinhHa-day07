@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from functools import reduce
 
 
 class FixedSizeChunker:
@@ -47,8 +48,14 @@ class SentenceChunker:
         self.max_sentences_per_chunk = max(1, max_sentences_per_chunk)
 
     def chunk(self, text: str) -> list[str]:
-        # TODO: split into sentences, group into chunks
-        raise NotImplementedError("Implement SentenceChunker.chunk")
+        if not text:
+            return []
+        sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+        sentences = [sent.strip() for sent in sentences]
+        return [
+            " ".join(sentences[i : i + self.max_sentences_per_chunk])
+            for i in range(0, len(sentences), self.max_sentences_per_chunk)
+        ]
 
 
 class RecursiveChunker:
@@ -61,17 +68,74 @@ class RecursiveChunker:
 
     DEFAULT_SEPARATORS = ["\n\n", "\n", ". ", " ", ""]
 
-    def __init__(self, separators: list[str] | None = None, chunk_size: int = 500) -> None:
-        self.separators = self.DEFAULT_SEPARATORS if separators is None else list(separators)
+    def __init__(
+        self,
+        separators: list[str] | None = None,
+        chunk_size: int = 500,
+    ) -> None:
+        self.separators = (
+            self.DEFAULT_SEPARATORS if separators is None else list(separators)
+        )
         self.chunk_size = chunk_size
 
     def chunk(self, text: str) -> list[str]:
-        # TODO: implement recursive splitting strategy
-        raise NotImplementedError("Implement RecursiveChunker.chunk")
+        return self._split(text, self.separators)
 
-    def _split(self, current_text: str, remaining_separators: list[str]) -> list[str]:
-        # TODO: recursive helper used by RecursiveChunker.chunk
-        raise NotImplementedError("Implement RecursiveChunker._split")
+    def _split(self, text: str, separators: list[str]) -> list[str]:
+        if not separators:
+            return [text]
+        final_chunks = []
+
+        separator = separators[-1]
+        new_separators = []
+        for i, s in enumerate(separators):
+            if s == '':
+                separator = s
+                break
+            if s in text:
+                separator = s
+                new_separators = separators[i+1:]
+
+        if separator != '':
+            splits = text.split(separator)
+        else:
+            splits = list(text)
+
+        good_splits = []
+        for s in splits:
+            if len(s) <= self.chunk_size:
+                good_splits.append(s)
+                continue
+            if good_splits:
+                final_chunks.extend(self._merge_splits(good_splits, separator))
+                good_splits = []
+            final_chunks.extend(self._split(s, new_separators))
+
+        if good_splits:
+            final_chunks.extend(self._merge_splits(good_splits, separator))
+
+        return final_chunks
+
+    def _merge_splits(self, splits: list[str], separator: str) -> list[str]:
+        merged = []
+        current_doc = []
+        total_len = 0
+
+        for s in splits:
+            s_len = len(s) + (len(separator) if current_doc else 0)
+            
+            if total_len + s_len <= self.chunk_size:
+                current_doc.append(s)
+                total_len += s_len
+            else:
+                if current_doc:
+                    merged.append(separator.join(current_doc))
+                current_doc = [s]
+                total_len = len(s)
+                
+        if current_doc:
+            merged.append(separator.join(current_doc))
+        return merged
 
 
 def _dot(a: list[float], b: list[float]) -> float:
@@ -86,8 +150,11 @@ def compute_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
     Returns 0.0 if either vector has zero magnitude.
     """
-    # TODO: implement cosine similarity formula
-    raise NotImplementedError("Implement compute_similarity")
+    numerator = _dot(vec_a, vec_b)
+    denumerator = _dot(vec_a, vec_a) * _dot(vec_b, vec_b)
+    if math.isclose(denumerator, 0, abs_tol=1e-6):
+        return 0
+    return numerator / denumerator
 
 
 class ChunkingStrategyComparator:
