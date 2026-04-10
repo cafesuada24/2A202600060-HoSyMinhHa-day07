@@ -89,14 +89,14 @@ class RecursiveChunker:
         separator = separators[-1]
         new_separators = []
         for i, s in enumerate(separators):
-            if s == '':
+            if s == "":
                 separator = s
                 break
             if s in text:
                 separator = s
-                new_separators = separators[i+1:]
+                new_separators = separators[i + 1 :]
 
-        if separator != '':
+        if separator != "":
             splits = text.split(separator)
         else:
             splits = list(text)
@@ -123,7 +123,7 @@ class RecursiveChunker:
 
         for s in splits:
             s_len = len(s) + (len(separator) if current_doc else 0)
-            
+
             if total_len + s_len <= self.chunk_size:
                 current_doc.append(s)
                 total_len += s_len
@@ -132,7 +132,7 @@ class RecursiveChunker:
                     merged.append(separator.join(current_doc))
                 current_doc = [s]
                 total_len = len(s)
-                
+
         if current_doc:
             merged.append(separator.join(current_doc))
         return merged
@@ -161,5 +161,22 @@ class ChunkingStrategyComparator:
     """Run all built-in chunking strategies and compare their results."""
 
     def compare(self, text: str, chunk_size: int = 200) -> dict:
-        # TODO: call each chunker, compute stats, return comparison dict
-        raise NotImplementedError("Implement ChunkingStrategyComparator.compare")
+        fixed_size_chunker = FixedSizeChunker(chunk_size=chunk_size)
+        by_sentences_chunker = SentenceChunker()
+        recursive_chunker = RecursiveChunker(chunk_size=chunk_size)
+
+        res = {}
+        for name, chunker in (
+            ("fixed_size", fixed_size_chunker),
+            ("by_sentences", by_sentences_chunker),
+            ("recursive", recursive_chunker),
+        ):
+            chunks = chunker.chunk(text)
+            res[name] = {}
+            res[name]["chunks"] = chunks
+            res[name]["count"] = len(chunks)
+            res[name]["avg_length"] = sum((len(chunk) for chunk in chunks)) / len(
+                chunks
+            )
+
+        return res
