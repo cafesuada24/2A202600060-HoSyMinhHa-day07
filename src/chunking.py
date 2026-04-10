@@ -17,10 +17,30 @@ class FixedSizeChunker:
     """
 
     def __init__(self, chunk_size: int = 500, overlap: int = 50) -> None:
+        """Initializes the FixedSizeChunker.
+
+        Args:
+            chunk_size: Maximum number of characters in each chunk.
+            overlap: Number of characters to overlap between consecutive chunks.
+        """
         self.chunk_size = chunk_size
         self.overlap = overlap
 
     def chunk(self, text: str) -> list[str]:
+        """Splits the input text into fixed-size chunks.
+
+           Fixed-size chunking is a foundational technique in RAG. By maintaining
+           a consistent chunk size, we ensure that each retrieved segment fits
+           into the LLM's context window. The 'overlap' is crucial because it
+           prevents semantic loss at boundaries, ensuring that concepts split
+           across chunks can still be understood in context.
+
+        Args:
+            text: The raw input string to be chunked.
+
+        Returns:
+            A list of strings, each being a chunk of text.
+        """
         if not text:
             return []
         if len(text) <= self.chunk_size:
@@ -45,9 +65,27 @@ class SentenceChunker:
     """
 
     def __init__(self, max_sentences_per_chunk: int = 3) -> None:
+        """Initializes the SentenceChunker.
+
+        Args:
+            max_sentences_per_chunk: Maximum number of sentences allowed in a single chunk.
+        """
         self.max_sentences_per_chunk = max(1, max_sentences_per_chunk)
 
     def chunk(self, text: str) -> list[str]:
+        """Splits the text into chunks based on sentence boundaries.
+
+           Sentence-based chunking is more semantically aware than fixed-size
+           chunking. By respecting sentence boundaries, we preserve the syntactic
+           integrity of the text, which often leads to higher-quality embeddings
+           as each chunk represents a complete set of thoughts or assertions.
+
+        Args:
+            text: The raw input string.
+
+        Returns:
+            A list of strings where each element is a group of sentences.
+        """
         if not text:
             return []
         sentences = re.split(r"(?<=[.!?])\s+", text.strip())
@@ -73,15 +111,49 @@ class RecursiveChunker:
         separators: list[str] | None = None,
         chunk_size: int = 500,
     ) -> None:
+        """Initializes the RecursiveChunker.
+
+        Args:
+            separators: A list of separator strings to try in order.
+            chunk_size: Target maximum size for each chunk.
+        """
         self.separators = (
             self.DEFAULT_SEPARATORS if separators is None else list(separators)
         )
         self.chunk_size = chunk_size
 
     def chunk(self, text: str) -> list[str]:
+        """Splits text using a recursive strategy.
+
+           Recursive chunking is often considered the 'gold standard' for RAG.
+           It attempts to split text at the most logical points (paragraphs,
+           then sentences, then words) until the resulting chunks are below
+           the target size. This hierarchical approach preserves the document's
+           natural structure better than any other method.
+
+        Args:
+            text: The raw input string.
+
+        Returns:
+            A list of strings optimized for both size and semantic coherence.
+        """
         return self._split(text, self.separators)
 
     def _split(self, text: str, separators: list[str]) -> list[str]:
+        """Internal recursive split implementation.
+
+           The recursion works by picking the highest-priority separator that
+           exists in the text and splitting the document. For segments that
+           are still too large, it moves to the next separator in the list
+           and repeats the process.
+
+        Args:
+            text: Current text segment.
+            separators: Remaining separators to try.
+
+        Returns:
+            A list of chunks for the current text segment.
+        """
         if not separators:
             return [text]
         final_chunks = []
@@ -117,6 +189,20 @@ class RecursiveChunker:
         return final_chunks
 
     def _merge_splits(self, splits: list[str], separator: str) -> list[str]:
+        """Combines smaller splits into chunks as close to chunk_size as possible.
+
+           Splitting alone can result in many tiny chunks. Merging is the
+           corrective step that consolidates these small pieces back together,
+           ensuring we maximize the information density in each chunk while
+           staying within the requested size limit.
+
+        Args:
+            splits: List of text segments to potentially merge.
+            separator: The separator used to originally split these segments.
+
+        Returns:
+            A list of merged chunks.
+        """
         merged = []
         current_doc = []
         total_len = 0
@@ -139,12 +225,18 @@ class RecursiveChunker:
 
 
 def _dot(a: list[float], b: list[float]) -> float:
+    """Calculates the dot product of two vectors."""
     return sum(x * y for x, y in zip(a, b))
 
 
 def compute_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     """
     Compute cosine similarity between two vectors.
+
+    Cosine similarity measures the orientation of two vectors in hyperspace,
+    making it invariant to the magnitude of the vectors. In text retrieval,
+    this means it measures the semantic 'closeness' regardless of the length
+    of the text segments (assuming normalized or consistently scaled embeddings).
 
     cosine_similarity = dot(a, b) / (||a|| * ||b||)
 
@@ -161,6 +253,20 @@ class ChunkingStrategyComparator:
     """Run all built-in chunking strategies and compare their results."""
 
     def compare(self, text: str, chunk_size: int = 200) -> dict:
+        """Evaluates different chunking strategies on a given text.
+
+           This utility allows developers to empirically determine which
+           strategy produces the most balanced chunks for their specific dataset.
+           By comparing metrics like chunk count and average length, one can
+           fine-tune the retrieval system for both performance and accuracy.
+
+        Args:
+            text: Sample text to be chunked.
+            chunk_size: Target size for the chunks.
+
+        Returns:
+            A dictionary containing stats for each chunking strategy.
+        """
         fixed_size_chunker = FixedSizeChunker(chunk_size=chunk_size)
         by_sentences_chunker = SentenceChunker()
         recursive_chunker = RecursiveChunker(chunk_size=chunk_size)

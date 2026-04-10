@@ -21,6 +21,20 @@ class EmbeddingStore:
         collection_name: str = "documents",
         embedding_fn: Callable[[str], list[float]] | None = None,
     ) -> None:
+        """Initializes the EmbeddingStore.
+
+           The store is designed with a hybrid architecture. It prioritizes
+           the use of ChromaDB for persistent, high-performance vector search
+           when available. If ChromaDB is missing, it transparently fails over
+           to a simple, in-memory Python list with O(N) search complexity,
+           ensuring that the application remains functional even in minimal
+           environments.
+
+        Args:
+            collection_name: The name of the collection/namespace in the store.
+            embedding_fn: A function that converts text strings into numerical
+                vectors. If None, a mock embedding function is used.
+        """
         self._embedding_fn = embedding_fn or _mock_embed
         self._collection_name = collection_name
         self._use_chroma = False
@@ -42,6 +56,15 @@ class EmbeddingStore:
             self._collection = None
 
     def _make_record(self, doc: Document) -> dict[str, Any]:
+        """Converts a Document object into a internal record dictionary.
+
+        Args:
+            doc: The Document instance to convert.
+
+        Returns:
+            A dictionary containing document ID, content, metadata, and an
+            initially empty embedding slot.
+        """
         return {
             "id": doc.id,
             "content": doc.content,
@@ -50,6 +73,19 @@ class EmbeddingStore:
         }
 
     def _get_or_create_embedding(self, record: dict[str, Any]) -> list[float]:
+        """Lazily generates or retrieves the embedding for a record.
+
+           Lazy embedding generation is an optimization that prevents
+           unnecessary computation during the bulk ingestion phase.
+           Embeddings are only calculated the first time a record is
+           actually needed for a similarity search.
+
+        Args:
+            record: The internal record dictionary.
+
+        Returns:
+            The numerical vector embedding for the record's content.
+        """
         if record.get("embedding") is None:
             record["embedding"] = self._embedding_fn(record["content"])
         return record["embedding"]
@@ -60,6 +96,21 @@ class EmbeddingStore:
         records: list[dict[str, Any]],
         top_k: int,
     ) -> list[dict[str, Any]]:
+        """Internal method to perform similarity search over a list of records.
+
+           For the in-memory fallback, we use 'heapq.nlargest' to find the top
+           results. This is significantly more efficient than sorting the
+           entire list (O(N log K) vs O(N log N)), which becomes important
+           as the number of documents grows into the thousands.
+
+        Args:
+            query: The search query string.
+            records: The subset of records to search through.
+            top_k: Number of results to return.
+
+        Returns:
+            A list of the most similar records with their calculated scores.
+        """
         query_emb = self._embedding_fn(query)
 
         # nlargest is significantly faster when top_k << len(records)
@@ -90,8 +141,13 @@ class EmbeddingStore:
         """
         Embed each document's content and store it.
 
-        For ChromaDB: use collection.add(ids=[...], documents=[...], embeddings=[...])
-        For in-memory: append dicts to self._store
+         When adding documents, we bypass manual embedding calculation if
+         using ChromaDB, as Chroma handles the embedding lifecycle
+         internally via the provided 'embedding_function'. This ensures
+         consistency between training-time and inference-time embeddings.
+
+        Args:
+            docs: A list of Document objects to be added to the store.
         """
         if not self._use_chroma:
             self._store.extend([self._make_record(doc) for doc in docs])
@@ -108,7 +164,12 @@ class EmbeddingStore:
         """
         Find the top_k most similar documents to query.
 
-        For in-memory: compute dot product of query embedding vs all stored embeddings.
+        Args:
+            query: The text to search for.
+            top_k: Maximum number of results to return.
+
+        Returns:
+            A list of results, each containing content, score, and metadata.
         """
         if self._use_chroma:
             return self.search_with_filter(query, top_k=top_k)
@@ -116,7 +177,7 @@ class EmbeddingStore:
         return self._search_records(query, self._store, top_k)
 
     def get_collection_size(self) -> int:
-        """Return the total number of stored chunks."""
+        """Returns the total number of chunks currently in the store."""
         if not self._use_chroma:
             return len(self._store)
 
@@ -132,7 +193,20 @@ class EmbeddingStore:
         """
         Search with optional metadata pre-filtering.
 
-        First filter stored chunks by metadata_filter, then run similarity search.
+        Metadata filtering is essential for reducing the search space and
+        improving retrieval precision. By filtering *before* the semantic
+        search (pre-filtering), we ensure that the top results strictly
+        adhere to the user's constraints (e.g., searching only within a
+        specific project's documentation).
+
+        Args:
+            query: The semantic search query.
+            top_k: Number of results to return.
+            metadata_filter: A dictionary of key-value pairs to match against
+                document metadata.
+
+        Returns:
+            A list of matching documents sorted by similarity.
         """
         if self._use_chroma:
             assert self._collection is not None
@@ -171,9 +245,13 @@ class EmbeddingStore:
 
     def delete_document(self, doc_id: str) -> bool:
         """
-        Remove all chunks belonging to a document.
+        Removes all chunks associated with a specific document ID.
 
-        Returns True if any chunks were removed, False otherwise.
+        Args:
+            doc_id: The unique identifier of the document to remove.
+
+        Returns:
+            True if one or more records were successfully deleted, False otherwise.
         """
         if not self._use_chroma:
             original_len = len(self._store)
